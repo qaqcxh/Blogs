@@ -1,0 +1,26 @@
+# site settings
+title: qwqcxh
+description: Notes on Computer Architecture, Linux Kernel and LLVM Compiler.
+
+# social
+social:
+  email: qwqcxh@gmail.com
+  github: https://github.com/qaqcxh
+# Build settings
+# theme: minima
+
+# plugins
+plugins:
+  - jekyll-feed
+
+exclude:
+  - .sass-cache/
+  - .jekyll-cache/
+  - gemfiles/
+  - Gemfile
+  - Gemfile.lock
+  - node_modules/
+  - vendor/bundle/
+  - vendor/cache/
+  - vendor/gems/
+  - vendor/ruby/

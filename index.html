@@ -1,0 +1,64 @@
+---
+layout: default
+title: Home
+---
+
+<style>
+.archive-group {
+  /* border: 1px solid #111111; */
+}
+.category-head{
+  font-family: monospace;
+  font-size: 2em;
+  margin: 0 auto;
+}
+.category-list {
+  line-height: 1.5em;
+  font-size: 1.3em;
+}
+.category-list li {
+  color: green;
+}
+.postdate {
+  float: right;
+  color: black;
+  opacity: .6;
+}
+
+.category-list a{
+  color: #111;
+  position: relative;
+}
+.category-list a:after{
+  content: '';
+  position: absolute;
+  top: 90%;
+  left: -0.1em;
+  right: -0.1em;
+  bottom: 0;
+  transition:top 200ms cubic-bezier(0, 0.8, 0.13, 1);
+  background-color: rgba(79, 192, 141, 0.5);
+}
+.category-list a:hover:after{
+  top:0%;
+}
+
+</style>
+
+<div id="archives">
+{% for category in site.categories %}
+  <div class="archive-group">
+    {% capture category_name %}{{ category | first }}{% endcapture %}
+
+    <h2 class="category-head">{{ category_name }}</h2>
+    <ul class="category-list">
+    {% for post in site.categories[category_name] %}
+      <li>
+        <a href="{{ site.baseurl }}{{ post.url }}">{{post.title | downcase}}</a>
+        <div class="postdate">{{ post.date | date: "%Y-%m-%d" }}</div>
+      </li>
+    {% endfor %}
+    </ul>
+  </div>
+{% endfor %}
+</div>
