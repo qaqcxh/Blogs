@@ -143,7 +143,7 @@ categories:
 
 OptionValue的类继承关系如下图所示：
 
-<img src="/Img/OptionValue.svg"  />
+<img src="G/Img/OptionValue.svg"  />
 
 ##### GenericOptionValue 抽象基类
 
