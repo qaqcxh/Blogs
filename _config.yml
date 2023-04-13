@@ -9,6 +9,7 @@ social:
 # Build settings
 # theme: minima
 
+url: https://qaqcxh.github.io/Blogs/
 baseurl: "/Blogs"
 
 # plugins
