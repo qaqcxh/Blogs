@@ -9,6 +9,8 @@ social:
 # Build settings
 # theme: minima
 
+baseurl: "/Blogs"
+
 # plugins
 plugins:
   - jekyll-feed
