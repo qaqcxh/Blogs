@@ -2,6 +2,10 @@
 categories:
  - LLVM
 ---
+
+* toc
+{:toc}
+
 ## class opt的实现
 
 ### 基类opt_storage模板的介绍

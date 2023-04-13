@@ -1,62 +1,11 @@
+---
+---
 <!DOCTYPE html>
 <html>
-  <head>
-    <!-- metadata -->
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    {% if page.title == "Home" %}
-      <meta name="description" content="{{ site.description }}">
-    {% endif %}
+  {% include head.html %}
 
-    <!-- navigator title -->
-    <title>
-      {% if page.title == "Home" %}
-        {{ site.title }}
-      {% else %}
-        {{ page.title }} &middot; {{ site.title }}
-      {% endif %}
-    </title>
-
-    <!-- CSS -->
-    <link rel="stylesheet" type="text/css" href="{{ site.url }}/assets/main.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
-  </head>
-
+  <!-- main content -->
   <body>
-    <!-- navigator -->
-    <div class="nav">
-      <!-- site title -->
-      <a href="{{ site.url }}/"> <h1 class="nav-title">{{ site.title }}</h1> </a>
-
-      <!-- description -->
-      {% if site.description %}
-      <div class="description">
-          {{ site.description }}
-      </div>
-      {% endif %}
-
-      <!-- social icons -->
-      <ul>
-        {% if site.social.github %}
-        <li>
-          <a target="_blank" href="{{ site.social.github }}">
-            <i class="fa fa-github"></i>
-          </a>
-        </li>
-        {% endif %}
-
-        {% if site.social.email %}
-        <li>
-          <a target="_blank" href="mailto:{{ site.social.email }}">
-            <i class="fa fa-envelope"></i>
-          </a>
-        </li>
-        {% endif %}
-      </ul>
-    </div>
-
-
-    <!-- main content -->
     <div class="main">
       {{ content }}
     </div>

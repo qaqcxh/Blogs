@@ -4,7 +4,8 @@ categories:
  - LLVM
 ---
 
-[toc]
+* toc
+{:toc}
 
 ## 快速使用导引
 
