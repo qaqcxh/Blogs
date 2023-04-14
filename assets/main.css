@@ -12,7 +12,7 @@
   font-weight: 500;
   opacity: .6;
   width: max-content;
-  margin: 0 auto;
+  margin: 0.2em auto;
   /* border: 1px solid #73AD21; */
 }
 .nav-title:hover {
