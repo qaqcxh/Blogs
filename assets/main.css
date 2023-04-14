@@ -50,6 +50,47 @@ a:active {
   text-decoration: none;
 }
 
+#search-bar .fa {
+  font-size: 24px;
+}
+#search-bar { /* most top level */
+  margin: 32px auto;
+  border: 1px solid #ccc;
+  border-radius: 20px;
+  padding: 0 20px;
+  text-align: left;
+  font-family: Monospace;
+}
+#search { /* input bar */
+  width: calc(95%);
+  border: none;
+  line-height: 2em;
+  outline: none;
+  border-style: none;
+  font-family: Monospace;
+  font-size: 24px;
+}
+#search-result {
+  display: none;
+  position: absolute;
+  margin-top: 1px;
+  width: calc(50%);
+  max-height: 325px;
+  overflow-y: auto;
+  background-color: white;
+  box-shadow: 0px 4px 8px 0 #ccc;
+  z-index: 99999;
+  font-size: 1.6em;
+  font-family: Monospace;
+  /* border: 1px solid #ccc; */
+}
+#search-result a {
+  opacity: .6;
+}
+#search-result a:hover {
+  opacity: 1.0;
+}
+
 .main {
   max-width: 800px;
   width: 80%;

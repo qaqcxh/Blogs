@@ -1,0 +1,18 @@
+---
+layout: none
+---
+
+[
+  {%- assign posts = site.posts -%}
+  {%- for subpost in posts -%}
+  {
+      "title": "{{ subpost.title | downcase | xml_escape }}",
+      "description": "{{ subpost.description | xml_escape }}",
+      "url": "{{ site.baseurl }}/{{ subpost.url }}",
+      "date": "{{ subpost.last_modified_at | date_to_xmlschema }}",
+      "category": "{{ subpost.categories }}"
+  }
+  {%- unless forloop.last -%},{%- endunless -%}
+  {%- endfor -%}
+]
+
