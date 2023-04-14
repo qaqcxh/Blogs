@@ -587,6 +587,68 @@ void apply(Opt *O, const Mod &M) {
 
 ## class list的实现
 
+
+`cl::list`的作用是收集解析的同类型选项值，因此需要做如下几件事：
+
+1. 设计数据结构保存解析结果。这是通过继承基类`cl::list_storage`来实现的。
+
+   ```cpp
+   template <class DataType, class StorageClass = bool, class ParserClass = parser<DataType>>
+   class list : public Option, public list_storage<DataType, StorageClass> { ... }
+   ```
+
+2. 解析选项字符串。这可以在内部设计一个`option parser`来解析字符串。有关`option parser`的介绍，见[下文](##option parser的实现) 。
+
+3. 提供接口查询每个选项所在命令行参数的位置。因此需要一个数组保存每次解析字符串的位置。
+
+故而其内部数据成员如下：
+
+```cpp
+std::vector<unsigned> Positions; //记录每个解析字符串的位置
+ParserClass Parser; //option parser
+```
+
+`cl::list`的功能接口主要分为两个：
+
+1. 首先，`list`应该能将自己注册到对应的`SubCommand`以及全局的`OptionMap`中。这样`CommandLineParser`在解析命令行参数时就能查询某个字符串是否是一个注册的选项。
+2. 提供选项值的解析功能。`CommandLineParser`在匹配到一个选项后需要调用`cl::list`提供的接口解析并保存选项值。
+
+1中的注册通过构造函数实现是直接的：
+
+```cpp
+template <class... Mods>
+explicit list(const Mods &... Ms): Option(ZeroOrMore, NotHidden), Parser(*this) {
+    apply(this, Ms...); // 将modifier应用到option上，比如`cl::sub`会记录该option所属的subcommands.
+    done(); // 注册
+}
+
+void done() {
+    addArgument(); // 1. 将该选项加入全局的OptionMap 2. 注册该选项到SubCommand中
+    Parser.initialize(); // option parser初始化，不过目前的实现该函数为空
+}
+```
+
+2中的解析功能是通过`handleOccurence`实现的。该解析函数接收选型名`ArgName`，选项值字符串`Arg`。将解析结果保存到内部存储中：
+
+```cpp
+bool handleOccurrence(unsigned pos, StringRef ArgName,
+                      StringRef Arg) override {
+    typename ParserClass::parser_data_type Val =
+        typename ParserClass::parser_data_type(); // 保存解析结果的临时变量
+    if (list_storage<DataType, StorageClass>::isDefaultAssigned()) { // 有默认值
+        clear(); // 清除掉默认值
+        list_storage<DataType, StorageClass>::overwriteDefault(); // 清除默认标记
+    }
+    if (Parser.parse(*this, ArgName, Arg, Val)) // 解析！
+        return true; // Parse Error!
+    list_storage<DataType, StorageClass>::addValue(Val); // 将解析结果加入内部存储结构
+    setPosition(pos);
+    Positions.push_back(pos); // 记录选项位置
+    Callback(Val); // 调用注册的回调
+    return false;
+}
+```
+
 ### 基类list_storage的实现
 
 `list_storage`是存储`cl::list`中同类型选项的容器。其目的与`opt_storage`一样保存选项值。且同样支持内部存储与外部存储的不同特化实现。
@@ -631,10 +693,27 @@ void apply(Opt *O, const Mod &M) {
 * 内部存储将`StorageClass`特化为了bool值，只有一个`DataType`模板参数：
 
   ```cpp
-  template <class Sat
+  template <class DataType> class list_storage<DataType, bool>
   ```
 
-  
+
+* 数据成员与主模板一样，只是采用`vector`作为内部存储的容器：
+
+  ```cpp
+  std::vector<DataType> Storage;
+  std::vector<OptionValue<DataType>> Default;
+  bool DefaultAssigned = false;
+  ```
+
+* 核心的接口`addValue`的实现如下：
+
+  ```cpp
+  template <class T> void addValue(const T &V, bool initial = false) {
+      Storage.push_back(V);
+      if (initial)
+          Default.push_back(OptionValue<DataType>(V));
+  }
+  ```
 
 ## class bits的实现
 
@@ -757,3 +836,4 @@ bool parse(Option &O, StringRef ArgName, StringRef Arg, DataType &Val);
 - [ ] `cl::opt`会在一个全局的数据结构中记录以便解析，那么当`cl::opt`出作用域需要析构时析构函数是否会将它们从全局数据结构中删除？逻辑上最好删除，待求证。
 - [ ] 如果自定义一个class用作`cl::opt`的数据类型，用默认的option parser需要定义
 - [ ] 为什么`OptionValue<DataType>`在`DataType`是class的时候内部并不保存该类型的默认值？是有什么实现难点？要搞清楚的话得看默认值在代码哪些地方被使用，如果该值是自定义类会发生什么。
+- [ ] 选项如果注册在`AllSubCommands`中，能将该选项注册到所有`SubCommands`中。那么假设选项构造时后面还有`SubCommand`尚未注册，那么该如何做到这一点？
