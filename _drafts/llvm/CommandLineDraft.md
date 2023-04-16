@@ -1,8 +1,311 @@
 [toc]
+[前一节]({{ link 2023-4-14-llvm-command-line-的使用(一) }})已经介绍了llvm CommandLine库的使用，本节将探讨该库的实现细节。
 
-## class opt的实现
+1. 首先我们先介绍下在构造`cl::opt`、`cl::list`等类时用到的modifier，看看这些修饰是如何作用到option上的。
+2. 然后我们再深入`cl::opt`、`cl::list`、`cl::bits`以及`cl::alias`四个顶层类的**接口设计与实现**。对于C++代码的阅读，我个人的看法是一种接口设计的艺术，了解每个类提供的接口，再探索下接口的实现基本就能掌握代码的逻辑了。
+3. 最后我们将介绍这几个顶层类在解析选项值时用到的`option parser`。
+
+
+## modifier修饰符（选项属性+选项修饰）的实现及应用
+
+在`cl::opt`，`cl::list`等类的构造函数中出现的参数统称为修饰符(modifier)，在源代码层面都认为是modifier，但是在一些官方手册中会将其细分为`Option Attribute`与`Option Modifer`，这一点需要注意。`Option Attribute`修饰符是一些类，需要构造这些类来携带特定信息；而`Option Modifier`则是一类标记，所以从实现角度这样细分是合理的（虽然使用上并不需要关心。modifier的作用就是**记录选项的一些特征**，比如你在设计一个选项时肯定要说明它的名字，是否有值，是否有默认值等。
+
+### 选项属性
+
+除了名字属性可以是一个普通字符串外，其余选项属性都是一个class。这些class都实现了一个`apply`接口：
+
+```cpp
+void apply(Option &O) const { O.xxx; } //将本属性的值apply到选项O上
+```
+
+顶层类在构造时会调用`apply`接口将属性或者标记添加到`option`类中，`CommandLineParser`在解析命令行字符串时就可以根据`option`类记录的信息来合理解析选项了。
+
+#### `cl::desc`属性类
+
+描述选项信息的字符串，内部就是一个简单字符串。`apply`接口简单地将字符串添加到`Option`中：
+
+```cpp
+struct desc {
+    StringRef Desc;
+    desc(StringRef Str) : Desc(Str) {}
+    void apply(Option &O) const { O.setDescription(Desc); }
+}
+```
+
+#### `cl::value_desc`属性类
+
+描述选项值的字符串，实现同`cl::desc`：
+
+```cpp
+struct value_desc {
+    StringRef Desc;
+    value_desc(StringRef Str) : Desc(Str) {}
+    void apply(Option &O) const { O.setValueStr(Desc); }
+}
+```
+
+#### `cl::init`与`cl::list_init`属性类
+
+这些属性设置选项的默认值，并且要能初始化不同数据类型的选项。一个直观的想法是将`cl::init`实现为一个类模板，但是**类模板不具有模板参数推导能力**，每次使用都得显示声明默认值的类型，像下面这样：
+
+```cpp
+cl::init<int>(10);
+cl::init<double>(10.0);
+cl::init<std::string>("-");
+```
+
+这样实现略显麻烦，由于模板函数可以进行参数推导，所以llvm的做法是用模板函数封装模板类。实现方式如下：
+
+1. 定义描述初始值的模板类，该类实现`apply`接口：
+
+   ```cpp
+   template <class Ty> struct initializer {
+       const Ty &Init;
+       initializer(const Ty &Val) : Init(Val) {}
+       template <class Opt> void apply(Opt &O) const { O.setInitialValue(Init); }
+   }
+   ```
+
+2. 使用模板函数封装该类，函数接收初始值并自动推导类型，构造并返回上面的模板类：
+
+   ```cpp
+   template <class Ty> initializer<Ty> init(const Ty &Val) {
+       return initializer<Ty>(Val);
+   }
+   ```
+
+`cl::list_init`与`cl::init`的实现类似，不同的是内部初始值是一个数组：
+```cpp
+template <class Ty> struct list_initializer {
+    ArrayRef<Ty> Inits;
+    list_initializer(ArrayRef<Ty> Vals) : Inits(Vals) {}
+    template <class Opt> void apply(Opt &O) const { O.setInitialValues(Inits); }
+}
+
+template <class Ty> list_initializer<Ty> list_init(ArrayRef<Ty> Vals) {
+    return list_initializer<Ty>(Vals);
+}
+```
+#### `cl::location`属性类
+
+`location`属性允许用户定义外部变量存储选项值的解析结果，而不必保存在选项内部。该属性可根据外部变量自动推导类型，返回对应的属性类。因此也是通过模板类+模板函数实现：
+
+1. 模板类为`LocationClass`，内部一个外部变量的引用，实现了`apply`接口：
+
+   ```cpp
+   template <class Ty> struct LocationClass {
+       Ty &Loc;
+       LocationClass(Ty &L) : Loc(L) {}
+       template <class Opt> void apply(Opt &O) const { O.setLocation(O, Loc);}
+   }
+   ```
+
+2. 模板函数如下：
+
+   ```cpp
+   template <class Ty> LocationClass<Ty> location(Ty &L) {
+       return LocationClass<Ty>(L);
+   }
+   ```
+
+#### `cl::cat`属性类
+
+`cat`属性指定选项属于哪一个类别，这样可在`-help`的输出中将选项组织起来。该类的数据成员就是选项类别：
+
+```cpp
+struct cat {
+    OptionCategory &Category;
+    cat(OptionCategory &c) : Category(c) {}
+    template<class Opt> void apply(Opt &O) const { O.addCategory(Category); }
+}
+```
+
+#### `cl::sub`属性类
+
+该属性指定选项所属的子命令，有关子命令的介绍，看第一节：
+
+```cpp
+struct sub {
+    SubCommand &Sub;
+    sub(SubCommand &S) : Sub(S) {}
+    template <class Opt> void apply(Opt &O) const { O.addSubCommand(Sub); }
+}
+```
+
+#### `cl::cb`属性类
+
+该属性指定一个选项相关的回调函数，每当解析其遇到一个该属性时就会调用一次注册的回调。为了自动推导输入的回调函数类型，该属性的实现也是利用模板类+模板函数的机制：
+
+1. 实现一个保存回调函数的模板类：
+
+   ```cpp
+   template <typename R, typename Ty> struct cb {
+       std::function<R(Ty)> CB;
+       cb(std::function<R(Ty)> CB) : CB(CB) {}
+       template <typename Opt> void apply(Opt &O) const { O.setCallBack(CB); }
+   }
+   ```
+
+2. 实现模板函数做输入函数的类型推导，并生成对应的属性类：
+
+   ```cpp
+   template <typename F>
+   cb<typename detail::callback_traits<F>::result_type,
+      typename detail::callback_traits<F>::arg_type> // 模板参数依赖的名字
+   callback(F CB) {
+          using result_type = typename detail::callback_traits<F>::result_type;
+          using arg_type = typename detail::callback_traits<F>::arg_type;
+          return cb<result_type, arg_type>(CB);
+      }
+   ```
+
+3. 上面用到的`callback_traits`实现如下：
+
+   * 首先需要定义`callback_traits`的主模板：
+
+     ```cpp
+     template <typename F>
+     struct callback_traits : public callback_traits<decltype(&F::operator()) {}
+     ```
+
+     主模板是暴露给用户使用的，提供一个函数类型就能提取返回类型与参数类型。要获取具体类型，常见的做法是用偏特化来匹配。
+
+   * 偏特化实现如下：
+
+     ```cpp
+     template <typename R, typename C, typename... Args>
+     struct callback_traits<R (C::*)(Args...) const> {
+         using result_type = R;
+         using arg_type = std::tuple_element_t<0, std::tuple<Args...>>;
+     }
+     ```
+
+#### `cl::values`属性类
+
+有一类特殊的选项，选项本身表示一个特定的枚举值。这类选项称为字面量选项（手册有时也叫作alternative)。如llvm opt工具中可以手动指定要运行的优化：
+
+```bash
+bash$ opt -mem2reg -dce -instcombine hello.ll
+```
+
+上面的`mem2reg,dec,instcombine`就是字面量选项。要支持这类选项，需要在声明选项时加入`cl::values`属性表明字面量的取值范围。其实现及使用如下：
+
+1. 需要一个类来实现属性类的`apply`接口并储存字面量值的信息，这个类由`ValueClass`实现：
+
+   ```cpp
+   class ValuesClass {
+       SmallVector<OptionEnumValue, 4> Values;
+   public:
+       ValuesClass(std::initializer_list<OptionEnumValue> Options)
+           : Values(Options) {}
+       template <class Opt> void apply(Opt &O) const { // apply 接口
+           for (const auto &Value : Values)
+               O.getParser().addLiteralOption(Value.Name, Value.Value, Value.Description); // 保存在Opt内部的parser中，这些OptionEnumValue会被用于解析。
+       }
+   }
+   
+   struct OptionEnumValue {
+       StringRef Name;
+       int Value;
+       StringRef Description;
+   }
+   ```
+
+2. `ValuesClass`可接收任意数量的`OptionEnumValue`，但是需要用初始化列表构造，可以通过使用函数参数包来实现变长参数：
+
+   ```cpp
+   template <typename... OptsTy> ValuesClass values(OptsTy... Options) {
+       return ValueClass({Options...});
+   }
+   ```
+
+### 选项修饰标记
+
+选项修饰标记只是一个枚举值，对选项标记的解析需要不同的处理（选项属性有对应的类，并提供了`apply`接口进行处理）。为了让修饰标记与属性类用相同的接口处理，可以用模板特化来分别实现：
+
+1. 所有modifier都通过一个`applicator::opt`函数来解析。
+
+2. 选项属性类可以作为主模板来实现，调用属性类的`apply`接口完成选项解析：
+
+   ```cpp
+   template <class Mod> struct applicator {
+       template <class Opt> static opt(const Mod &M, Opt &O) { M.apply(O); }
+   }
+   ```
+
+3. 每个选项修饰标志都通过特化该主模板来分别实现：
+
+   ```cpp
+   // 处理选项名modifier
+   template <unsigned n> struct applicator<char[n]> {
+       template <class Opt> static opt(StringRef Str, Opt &O) {
+           O.setArgStr(Str);
+       }
+   };
+   // 处理NumOccurrences标记
+   template <> struct applicator<NumOccurrencesFlag> {
+       template <class OPt> static opt(NumOccurencesFlag N, Opt &O) {
+           O.setNumOccurrencesFlag(N);
+       }
+   };
+   ...
+   ```
+
+现在，所有modifier都可以通过实例化`applicator`并调用其中的`opt`方法来解析。要解析`cl::opt`等类中的可变构造函数参数，可以使用函数参数包进行实现：
+
+```cpp
+template <class Opt, class Mod, class... Mods>
+void apply(Opt *O, const Mod &M, const Mods&... Ms) {
+    applicator<Mod>::opt(M, O);
+    apply(O, Ms...);
+}
+
+template <class Opt, class Mod> // 递归基础
+void apply(Opt *O, const Mod &M) {
+    applicator<MOd>::opt(M, O);
+}
+```
+
+## 顶层类opt的实现
+
+`cl::opt`的作用是根据modifier的描述与约束，提供本选项的选项值解析函数。可以依据`cl::opt`提供的功能将其实现进行分解：
+
+1. 首先需要对modifier进行解析记录，这一点前面已经提到。
+2. 其次需要将本选项进行注册，`CommandLineParser`在解析命令行参数时是按照单词流匹配选项的，所以需要在`opt`构造时就将其注册到选项库中供匹配。
+3. 接着`opt`需要提供一个选项值的解析接口，供`CommandLineParser`调用来处理选项值字符串。
+4. 最后需要提供一个存储变量来保存选项值的解析结果。
+
+第一点和第二点在构造函数中进行了实现：
+
+```cpp
+template <class... Mods>
+explicit opt(const Mods &... Ms)
+    : Option(llvm::cl::Optional, NotHidden), Parser(*this) {
+  apply(this, Ms...); // 解析记录modifier
+  done(); // 注册选项到OptionMap以及SubCommand中
+}
+```
+
+第三点中解携的接口是`handleOccurrence`：
+
+```cpp
+bool handleOccurrence(unsigned pos, StringRef ArgName,
+                        StringRef Arg) override {
+  typename ParserClass::parser_data_type Val =
+      typename ParserClass::parser_data_type();
+  if (Parser.parse(*this, ArgName, Arg, Val))
+    return true; // Parse error!
+  this->setValue(Val);
+  this->setPosition(pos);
+  Callback(Val);
+  return false;
+}
+```
+
+第四点保存的值是由`opt_storage`基类提供的，下面会进行介绍。
 
 ### 基类opt_storage模板的介绍
+
 * `opt_storage`是一个存储选项值的模板类，其模板参数如下：
 
   ```cpp
@@ -76,7 +379,9 @@
     
          从代码实例来看，对于选项值是类的`opt_storage`，其内部的`Default`只是一个占位的成员，并不存储实际内容。所以有一个疑问：
     
-         - [ ] 为什么不让选项值是class的`opt_storage`含有默认值，理论上只要有构造函数就能设置默认选项值了？
+         - [x] 为什么不让选项值是class的`opt_storage`含有默认值，理论上只要有构造函数就能设置默认选项值了？
+         
+           **解答：**个人觉得要实现也是可以的，但是基本类型已经够用了，自定义类来存储选项值貌似没必要。
     
     * 采用内部存储，且选项数据类型是基本数据的特化2的实现细节如下：
     
@@ -132,20 +437,20 @@
       5. 设置了一个`DataType`类型转换算子：
       
          ```cpp
-         operator DataType() const { return this->getValue(); }
-         ```
-
+       operator DataType() const { return this->getValue(); }
+       ```
+  
 * 小结一下`opt_storage`这个类可以在**内部或者外部**存储选项值，主要提供`getValue(),setValue()`与`getDefault()`三个API函数。
 
 #### OptionValue模板类的介绍
 
-OptionValue的类继承关系如下图所示：
+OptionValue是存储选项默认值的类，其继承关系如下图所示：
 
-<img src="/home/qwqcxh/文档/LLVM Study/Img/OptionValue.svg"  />
+<img src="{{ site.baseurl }}/Img/OptionValue.svg"  />
 
 ##### GenericOptionValue 抽象基类
 
-* 该类是一个抽象类，只定义了一个`compare`比较的接口：
+* 该类是一个抽象类，只定义了一个`compare`比较的接口（用于打印函数和默认值比较）：
 
   ```cpp
   virtual bool compare(const GenericOptionValue) = 0;
@@ -270,7 +575,7 @@ void registerCategory(); // 注册函数
 
 #### 功能类SubCommand
 
-`cl::SubCommand`用于声明一个逻辑独立的子命令种类。如果命令行参数可以从逻辑上分为若干个子功能，那么就可以声明多个`cl::SubCommand`，并将选项通过`cl::sub`属性进行归类。归类后就可以利用`cl::SubCommand`提供的功能接口判断是否有该子命令的选项、有哪些选项等。如下是一个例子：
+`cl::SubCommand`用于声明一个逻辑独立的子命令(比如git commit, git pull中commit和pull就是子命令)。如果命令行参数可以从逻辑上分为若干个子功能，那么就可以声明多个`cl::SubCommand`，并将选项通过`cl::sub`属性进行归类。归类后就可以利用`cl::SubCommand`提供的功能接口判断是否有该子命令的选项、有哪些选项等。如下是一个例子：
 
 ```cpp
 #include "llvm/Support/CommandLine.h"
@@ -327,266 +632,7 @@ int main(int argc, char **argv) {
    StringMap<Option *> OptionsMap;
    ```
 
-## 一般修饰符（选项属性+选项修饰）的实现及应用
-
-在`cl::opt`，`cl::list`等类的构造函数中出现的参数统称为修饰符(modifier)，在源代码层面都认为是modifier，但是在一些官方手册中会将其细分为`Option Attribute`与`Option Modifer`，这一点需要注意。`Option Attribute`修饰符是一些类，需要构造这些类来携带特定信息；而`Option Modifier`则是一类标记，所以从实现角度这样细分是合理的（虽然使用上并不需要关心。
-
-### 选项属性
-
-除了名字属性可以是一个普通字符串外，其余选项属性都是一个class。这些class都实现了一个`apply`接口：
-
-```cpp
-void apply(Option &O) const { O.xxx; } //将本属性的值apply到选项O上
-```
-
-#### `cl::desc`属性
-
-描述选项信息的字符串，内部就是一个简单字符串：
-
-```cpp
-struct desc {
-    StringRef Desc;
-    desc(StringRef Str) : Desc(Str) {}
-    void apply(Option &O) const { O.setDescription(Desc); }
-}
-```
-
-#### `cl::value_desc`属性
-
-描述选项值的字符串，实现同`cl::desc`：
-
-```cpp
-struct value_desc {
-    StringRef Desc;
-    value_desc(StringRef Str) : Desc(Str) {}
-    void apply(Option &O) const { O.setValueStr(Desc); }
-}
-```
-
-#### `cl::init`与`cl::list_init`属性
-
-按照之前的描述，选项属性对应一个class，因此`cl::init`的结果必然是一个携带`apply`接口的类。一个直观的想法是将`cl::init`实现为一个模板类，但是类模板不具有模板参数推导能力，每次使用都得显示声明默认值的类型，像下面这样：
-
-```cpp
-cl::init<int>(10);
-cl::init<double>(10.0);
-cl::init<std::string>("-");
-```
-
-这样实现略显麻烦，由于模板函数可以进行参数推导，所以一种经典的做法是用模板函数封装模板类。实现方式如下：
-
-1. 定义描述初始值的模板类，该类实现`apply`接口：
-
-   ```cpp
-   template <class Ty> struct initializer {
-       const Ty &Init;
-       initializer(const Ty &Val) : Init(Val) {}
-       template <class Opt> void apply(Opt &O) const { O.setInitialValue(Init); }
-   }
-   ```
-
-2. 使用模板函数封装该类，函数接收初始值并自动推导类型，构造并返回上面的模板类：
-
-   ```cpp
-   template <class Ty> initializer<Ty> init(const Ty &Val) {
-       return initializer<Ty>(Val);
-   }
-   ```
-
-`cl::list_init`与`cl::init`的实现类似，不同的是内部初始值是一个数组：
-```cpp
-template <class Ty> struct list_initializer {
-    ArrayRef<Ty> Inits;
-    list_initializer(ArrayRef<Ty> Vals) : Inits(Vals) {}
-    template <class Opt> void apply(Opt &O) const { O.setInitialValues(Inits); }
-}
-
-template <class Ty> list_initializer<Ty> list_init(ArrayRef<Ty> Vals) {
-    return list_initializer<Ty>(Vals);
-}
-```
-#### `cl::location`属性
-
-该属性允许用户定义外部变量存储选项值的解析结果，而不必保存在选项内部。该属性可根据外部变量自动推导类型，返回对应的属性类。因此也是通过模板类+模板函数实现：
-
-1. 模板类为`LocationClass`，内部一个外部变量的引用，实现了`apply`接口：
-
-   ```cpp
-   template <class Ty> struct LocationClass {
-       Ty &Loc;
-       LocationClass(Ty &L) : Loc(L) {}
-       template <class Opt> void apply(Opt &O) const { O.setLocation(O, Loc);}
-   }
-   ```
-
-2. 模板函数如下：
-
-   ```cpp
-   template <class Ty> LocationClass<Ty> location(Ty &L) {
-       return LocationClass<Ty>(L);
-   }
-   ```
-
-#### `cl::cat`属性
-
-该属性指定选项属于哪一个类别，因此该类的数据成员就是选项类别：
-
-```cpp
-struct cat {
-    OptionCategory &Category;
-    cat(OptionCategory &c) : Category(c) {}
-    template<class Opt> void apply(Opt &O) const { O.}
-}
-```
-
-#### `cl::sub`属性
-
-该属性指定选项所属的子命令：
-
-```cpp
-struct sub {
-    SubCommand &Sub;
-    sub(SubCommand &S) : Sub(S) {}
-    template <class Opt> void apply(Opt &O) const { O.addSubCommand(Sub); }
-}
-```
-
-#### `cl::cb`属性
-
-该属性指定一个选项相关的回调函数，每当解析其遇到一个该属性时就会调用一次注册的回调。为了自动推导输入的回调函数类型，该属性的实现也是利用模板类+模板函数的机制：
-
-1. 实现一个保存回调函数的模板类：
-
-   ```cpp
-   template <typename R, typename Ty> struct cb {
-       std::function<R(Ty)> CB;
-       cb(std::function<R(Ty)> CB) : CB(CB) {}
-       template <typename Opt> void apply(Opt &O) const { O.setCallBack(CB); }
-   }
-   ```
-
-2. 实现模板函数做输入函数的类型推导，并生成对应的属性类：
-
-   ```cpp
-   template <typename F>
-   cb<typename detail::callback_traits<F>::result_type,
-      typename detail::callback_traits<F>::arg_type> // 模板参数依赖的名字
-   callback(F CB) {
-          using result_type = typename detail::callback_traits<F>::result_type;
-          using arg_type = typename detail::callback_traits<F>::arg_type;
-          return cb<result_type, arg_type>(CB);
-      }
-   ```
-
-3. 上面用到的`callback_traits`实现如下：
-
-   * 首先需要定义`callback_traits`的主模板：
-
-     ```cpp
-     template <typename F>
-     struct callback_traits : public callback_traits<decltype(&F::operator()) {}
-     ```
-
-     主模板是暴露给用户使用的，提供一个函数类型就能提取返回类型与参数类型。要获取具体类型，常见的做法是用偏特化来匹配。
-
-   * 偏特化实现如下：
-
-     ```cpp
-     template <typename R, typename C, typename... Args>
-     struct callback_traits<R (C::*)(Args...) const> {
-         using result_type = R;
-         using arg_type = std::tuple_element_t<0, std::tuple<Args...>>;
-     }
-     ```
-
-#### `cl::values`属性
-
-有一类特殊的选项，选项本身表示一个特定的枚举值。这类选项称为字面量选项（手册有时也叫作alternative)。如llvm opt工具中可以手动指定要运行的优化：
-
-```bash
-bash$ opt -mem2reg -dce -instcombine hello.ll
-```
-
-上面的`mem2reg,dec,instcombine`就是字面量选项。要支持这类选项，需要在声明选项时加入`cl::values`属性表明字面量的取值范围。其实现及使用如下：
-
-1. 需要一个类来实现属性类的`apply`接口并储存字面量值的信息，这个类由`ValueClass`实现：
-
-   ```cpp
-   class ValuesClass {
-       SmallVector<OptionEnumValue, 4> Values;
-   public:
-       ValuesClass(std::initializer_list<OptionEnumValue> Options)
-           : Values(Options) {}
-       template <class Opt> void apply(Opt &O) const { // apply 接口
-           for (const auto &Value : Values)
-               O.getParser().addLiteralOption(Value.Name, Value.Value, Value.Description); // 保存在Opt内部的parser中，这些OptionEnumValue会被用于解析。
-       }
-   }
-   
-   struct OptionEnumValue {
-       StringRef Name;
-       int Value;
-       StringRef Description;
-   }
-   ```
-
-2. `ValuesClass`可接收任意数量的`OptionEnumValue`，但是需要用初始化列表构造，可以通过使用函数参数包来实现变长参数：
-
-   ```cpp
-   template <typename... OptsTy> ValuesClass values(OptsTy... Options) {
-       return ValueClass({Options...});
-   }
-   ```
-
-### 选项修饰标记
-
-选项修饰标记只是一个枚举值，对选项标记的解析需要不同的处理（选项属性有对应的类，并提供了`apply`接口进行处理）。为了让修饰标记与属性类用相同的接口处理，可以用模板特化来分别实现：
-
-1. 所有modifier都通过一个`applicator::opt`函数来解析。
-
-2. 选项属性可以作为主模板来实现，调用属性类的`apply`接口完成选项解析：
-
-   ```cpp
-   template <class Mod> struct applicator {
-       template <class Opt> static opt(const Mod &M, Opt &O) { M.apply(O); }
-   }
-   ```
-
-3. 每个选项修饰标志都通过特化该主模板来分别实现：
-
-   ```cpp
-   // 处理选项名modifier
-   template <unsigned n> struct applicator<char[n]> {
-       template <class Opt> static opt(StringRef Str, Opt &O) {
-           O.setArgStr(Str);
-       }
-   };
-   // 处理NumOccurrences标记
-   template <> struct applicator<NumOccurrencesFlag> {
-       template <class OPt> static opt(NumOccurencesFlag N, Opt &O) {
-           O.setNumOccurrencesFlag(N);
-       }
-   };
-   ...
-   ```
-
-现在，所有modifier都可以通过实例化`applicator`并调用其中的`opt`方法来解析。要解析`cl::opt`等类中的可变构造函数参数，可以使用函数参数包进行实现：
-
-```cpp
-template <class Opt, class Mod, class... Mods>
-void apply(Opt *O, const Mod &M, const Mods&... Ms) {
-    applicator<Mod>::opt(M, O);
-    apply(O, Ms...);
-}
-
-template <class Opt, class Mod> // 递归基础
-void apply(Opt *O, const Mod &M) {
-    applicator<MOd>::opt(M, O);
-}
-```
-
 ## class list的实现
-
 
 `cl::list`的作用是收集解析的同类型选项值，因此需要做如下几件事：
 
@@ -628,7 +674,7 @@ void done() {
 }
 ```
 
-2中的解析功能是通过`handleOccurence`实现的。该解析函数接收选型名`ArgName`，选项值字符串`Arg`。将解析结果保存到内部存储中：
+2中的解析功能是通过`handleOccurence`实现的。该解析函数接收选项名`ArgName`，选项值字符串`Arg`。将解析结果保存到内部存储中：
 
 ```cpp
 bool handleOccurrence(unsigned pos, StringRef ArgName,
@@ -653,7 +699,7 @@ bool handleOccurrence(unsigned pos, StringRef ArgName,
 
 `list_storage`是存储`cl::list`中同类型选项的容器。其目的与`opt_storage`一样保存选项值。且同样支持内部存储与外部存储的不同特化实现。
 
-#### 外部存储主模板
+#### list_storage外部存储主模板
 
 * 默认的存储方式是外部存储，包含选项值数据类型`DataType`与容器数据类型`StorageClass`两个模板参数：
 
@@ -688,7 +734,7 @@ bool handleOccurrence(unsigned pos, StringRef ArgName,
   }
   ```
 
-#### 内部存储特化模板
+#### list_storage内部存储特化模板
 
 * 内部存储将`StorageClass`特化为了bool值，只有一个`DataType`模板参数：
 
@@ -716,6 +762,8 @@ bool handleOccurrence(unsigned pos, StringRef ArgName,
   ```
 
 ## class bits的实现
+
+`cl::bits`的实现和`cl::list`别无二致，区别在于bits内部是用一个`unsigned`来作为bitmap存储选项值。实现的接口也主要是构造函数中的选项注册以及供`CommandLineParser`使用的解析函数`handleOccurrence`。
 
 ## option parser的实现
 
@@ -833,7 +881,18 @@ bool parse(Option &O, StringRef ArgName, StringRef Arg, DataType &Val);
 
 ## 阅读疑问记录
 
-- [ ] `cl::opt`会在一个全局的数据结构中记录以便解析，那么当`cl::opt`出作用域需要析构时析构函数是否会将它们从全局数据结构中删除？逻辑上最好删除，待求证。
-- [ ] 如果自定义一个class用作`cl::opt`的数据类型，用默认的option parser需要定义
-- [ ] 为什么`OptionValue<DataType>`在`DataType`是class的时候内部并不保存该类型的默认值？是有什么实现难点？要搞清楚的话得看默认值在代码哪些地方被使用，如果该值是自定义类会发生什么。
-- [ ] 选项如果注册在`AllSubCommands`中，能将该选项注册到所有`SubCommands`中。那么假设选项构造时后面还有`SubCommand`尚未注册，那么该如何做到这一点？
+- [x] `cl::opt`会在一个全局的数据结构中记录以便解析，那么当`cl::opt`出作用域需要析构时析构函数是否会将它们从全局数据结构中删除？逻辑上最好删除，待求证。
+
+  `cl::opt`出作用域自动析构，注册在`SubCommand`的`OptionMaps`中的只是地址，`OptionMaps`自然也会自动析构，不会触发问题。
+
+- [x] 如何自定义一个class用作`cl::opt`的数据类型？
+
+  自己实现一个`option parser`解析选项值字符串即可。
+
+- [x] 为什么`OptionValue<DataType>`在`DataType`是class的时候内部并不保存该类型的默认值？是有什么实现难点？要搞清楚的话得看默认值在代码哪些地方被使用，如果该值是自定义类会发生什么。
+
+  应该就是一种设计，实现的话应该也不是做不到。
+
+- [x] 选项如果注册在`AllSubCommands`中，能将该选项注册到所有`SubCommands`中。那么假设选项构造时后面还有`SubCommand`尚未注册，那么该如何做到这一点？
+
+  在该`option`构造之前的`SubCommand`自然已经被注册到`CommandLineParser`中，构造时往这些`SubCommand`添加该`option`即可。在之后的`SubCommand`注册时需要将`AllSubCommands`中的所有选项加入自身。
