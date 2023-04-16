@@ -1,7 +1,10 @@
+---
+layout: none
+---
 
 $(function () {
   var posts = [];
-  $.get('assets/js/posts.json', function (data) {
+  $.get('{{ site.baseurl }}/assets/js/posts.json', function (data) {
     posts = data;
   });
   $('#search').on('keyup', function () {

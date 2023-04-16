@@ -1,7 +1,14 @@
-[toc]
+---
+title: llvm CommandLine 库的实现（其二）
+categories:
+ - LLVM
+---
+
+* toc
+{:toc}
 
 # llvm CommandLine 库的实现（其二）
-[前一节]({{ link 2023-4-14-llvm-command-line-的使用(一) }})已经介绍了llvm CommandLine库的使用，本节将探讨该库的实现细节。
+[前一节]({% link _posts/llvm/2023-4-16-CommandLineUse.md %}) 已经介绍了llvm CommandLine库的使用，本节将探讨该库的实现细节。
 
 1. 首先我们先介绍下在构造`cl::opt`、`cl::list`等类时用到的modifier，看看这些修饰是如何作用到option上的。
 2. 然后我们再深入`cl::opt`、`cl::list`、`cl::bits`以及`cl::alias`四个顶层类的**接口设计与实现**。对于C++代码的阅读，我个人的看法是一种接口设计的艺术，了解每个类提供的接口，再探索下接口的实现基本就能掌握代码的逻辑了。

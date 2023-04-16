@@ -21,6 +21,8 @@ kramdown:
 url: https://qaqcxh.github.io/Blogs/
 baseurl: "/Blogs"
 
+permalink: /:categories/:title:output_ext
+
 # default values
 defaults:
   -

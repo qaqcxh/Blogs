@@ -61,7 +61,7 @@ title: Home
     <ul class="category-list">
     {% for post in site.categories[category_name] %}
       <li>
-        <a href="{{ site.baseurl }}{{ post.url }}">{{post.title | downcase}}</a>
+        <a href="{{ site.baseurl }}{{ post.url }}">{{post.title}}</a>
         <span style="float: right;">{{ post.date | date: "%Y-%m-%d" }}</span>
         <!-- <div class="postdate">{{ post.date | date: "%Y-%m-%d" }}</div> -->
       </li>
