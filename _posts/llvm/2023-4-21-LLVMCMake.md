@@ -5,7 +5,8 @@ categories:
   - CMake
 ---
 
- [toc]
+* toc
+{:toc}
 
 # LLVM CMake 构建系统
 
