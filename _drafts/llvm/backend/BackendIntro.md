@@ -1,11 +1,11 @@
 ---
-title: llvm 新增一个后端架构需要了解哪些类
+title: LLVM 后端架构支持（其一）
 categories: LLVM
 ---
 
 [toc]
 
-# llvm 新增一个后端架构需要了解哪些类
+# LLVM 后端架构支持
 
 对于一个新手来说，在llvm后端新增加一个架构是一个不小的挑战。要实现这个目标，首先需要对后端涉及到的一些类有个大致了解。当然第一遍阅读肯定是粗糙的，你不可能一遍了解所有类的精确用途。但是我觉得可以尝试做到一下几点：
 
@@ -38,7 +38,15 @@ categories: LLVM
    std::string TargetFS; // target feature string
    ```
 
-3. 汇编、寄存器、机器指令、子架构信息：
+3. 架构的代码模型(code model)与重定位模型(relocation model)。代码模型是编译器对编译代码地址空间的假设，这样编译器可以选择合适的寻址模式；重定位模型是对位置无关代码的描述，可以没有任何重定位指令，全使用绝对地址(static)，也可以是全部使用位置无关代码(`pic`)等。可以参考这篇[文章](https://doc.rust-lang.org/rustc/codegen-options/index.html)。
+
+   ```cpp
+   Reloc::Model RM = Reloc::Static;
+   CodeModel::Model CMModel = CodeModel::Samll;
+   CodeGenOpt::Level OptLevel = CodeGenOpt::Default;
+   ```
+
+4. 汇编、寄存器、机器指令、子架构信息：
 
    ```cpp
    std::unique_ptr<const MCAsmInfo> AsmInfo;
@@ -47,7 +55,7 @@ categories: LLVM
    std::unique_ptr<const MCSubtargetInfo> STI;
    ```
 
-4. 一些硬件功能选项以及其他后端代码生成的算法接口等：
+5. 一些硬件功能选项以及其他后端代码生成的算法接口等：
 
    ```cpp
    const TargetOptions DefaultOptions;
