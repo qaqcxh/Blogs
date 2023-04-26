@@ -490,21 +490,125 @@ struct MCRegisterDesc {
 
 ## MCRegisterInfo
 
+`MCRegisterInfo`是整个`MCRegister`相关的**接口类**。它是对以上几个类的封装，所有对物理寄存器的访问都应该通过`MCRegisterInfo`的接口来使用。
 
+1. `MCRegisterInfo`应该能得到任意物理寄存器的信息。所以内部有一个`MCRegisterDesc`的数组：
 
-- [x] `MCReigsterDesc`中`SubRegs`与`SuperRegs`是一个`uint32_t`，不是常见的容器类型，那么一个整数是如何表示寄存器集合呢？难道是一个表的索引？
+   ```cpp
+   const MCRegisterDesc *Desc; // Pointer to the descriptor array
+   unsigned NumRegs;           // Number of entries in the array
+   ```
 
-  **解答：**`SubRegs、SuperRegs`是相对`<Target>RegDiffLists`的偏移，`DiffLists`一串差分表。给定一个初始值，可以通过累加差分表得到一列最终的结果表。
+   该数组在X86下是通过`InitX86MCRegisterInfo`函数初始化的，两成员分别被赋值`X86RegDesc`与292。获取某个物理寄存器信息时，直接使用`operator []`或`get`函数即可：
 
-- [x] `SubRegIndicies`表示什么？
+   ```cpp
+   const MCRegisterDesc &operator[](MCRegister RegNo) const {
+     assert(RegNo < NumRegs &&
+            "Attempting to access record for invalid register number!");
+     return Desc[RegNo];
+   }
+   
+   /// Provide a get method, equivalent to [], but more useful with a
+   /// pointer to this object.
+   const MCRegisterDesc &get(MCRegister RegNo) const {
+     return operator[](RegNo);
+   }
+   ```
 
-  **解答：**`SubRegIndicies`表示一组子寄存器，它是一个索引，是相对`<target>SubRegIdxLists`的偏移。`<target>SubRegIdxLists`中的元素表示一个具体的子寄存器位置，它也是一个索引，通过索引`SubRegIdxRanges`，可以确定子寄存器的起始比特以及长度。
+   此外，`MCRegisterInfo`提供了每个物理寄存器的名字数组，可以用`getName`方法获取名字：
 
-- [x] `RegUnits`又是什么概念？
+   ```cpp
+   const char *RegStrings;     // Pointer to the string table.
+   
+   /// Return the human-readable symbolic target-specific name for the
+   /// specified physical register.
+   const char *getName(MCRegister RegNo) const {
+     return RegStrings + get(RegNo).Name;
+   }
+   ```
 
-  **解答：**`RegUnits`是最小的子寄存器单元，任何其他子寄存器都可以认为是若干个`RegUnits`组成。`RegUnits`也是索引`DiffLists`，计算后的一组小表可以通过`<target>RegUnitRoots`解析得到。
+   在所有物理寄存器中，有两个特殊的寄存器被单独列举出来。一个是返回地址寄存器，另一个是程序计数寄存器：
 
-- [ ] `RegUnitLaneMasks`是什么东西？
+   ```cpp
+   MCRegister RAReg; // Return address register
+   MCRegister PCReg; // Program counter register
+   ```
+
+   可直接调用对应的get方法进行获取。
+
+2. `MCRegisterInfo`提供了对寄存器类的访问，在实现上所有寄存器类被保存在一个数组中。`MCRegisterInfo`提供了一个数组地址与大小来引用该数组：
+
+   ```cpp
+   const MCRegisterClass *Classes; // Pointer to the regclass array
+   unsigned NumClasses;            // Number of entries in the array
+   const char *RegClassStrings;    // Pointer to the class strings.
+   ```
+
+   这两成员在X86下被初始化为`X86MCRegisterClasses`与126。表明X86下共有126个寄存器类。
+
+   同样地，寄存器类也有对应的名字数组与`get`方法：
+
+   ```cpp
+   const char *RegClassStrings;  // Pointer to the class strings.
+   
+   const char *getRegClassName(const MCRegisterClass *Class) const {
+     return RegClassStrings + Class->NameIdx;
+   }
+   ```
+
+3. 提供获取物理寄存器所包含的`RegUnit`的方法。回忆一下`RegUnit`是最小不可划分的子寄存器。它的值被编码在`DiffLists`差分表中，每个`RegUnit`需要再索引`RegUnitRoots`才能得到寄存器编号。
+
+   ```cpp
+   const MCPhysReg *DiffLists;  // Pointer to the difflists array
+   const MCPhysReg (*RegUnitRoots)[2]; // Pointer to regunit root table.
+   unsigned NumRegUnits;        // Number of regunits. also length of RegUnitRoots.
+   ```
+
+   以上数据成员分别被初始化为`X86RegDiffLists`，`X86RegUnitRoots`,173。
+
+   要遍历一个物理寄存器所包含的`RegUnit`，LLVM提供了`MCRegUnitIterator`与`MCRegUntiRootIterator`跌代器供使用，典型的方式如下：
+
+   ```cpp
+   for (MCRegUnitIterator RUI(RegNo, MCRI); RUI.isValid(); ++RUI) {
+       for (MCRegUnitRootIterator RURI(*RUI, MCRI); RURI.isValid(); ++RURI) {
+           visit(*RURI); // *RURI即是regunit的物理寄存器
+       }
+   }
+   ```
+   此外，`MCRegisterInfo`中有一个`RegUnitMaskSequnce`指向`RegUnit`的`LaneBitmask`。获取一个物理寄存器的`LaneBitmask`也需要通过`MCRegUnitMaskIterator`迭代器遍历。
+
+4. `MCRegisterInfo`也封装了对一个物理寄存器的`SubRegIndices`的访问。比如我们想得到某个子寄存器的起始比特与大小，需要先获得该`SubReg`的`Index`。与此相关的两个数据成员是`SubRegIndices`数组与`SubRegIdxRanges`数组：
+
+   ```cpp
+   const uint16_t *SubRegIndices; // Pointer to the subreg lookup array.
+   unsigned NumSubRegIndices; // Number of subreg indices.
+   const SubRegCoveredBits *SubRegIdxRanges; // Pointer to the subreg covered bit ranges array.
+   ```
+
+   `SubRegIndices`是一个索引表，布局没有特殊安排，由`TableGen`自动生成，被初始化为`X86SubRegIdxLists`。`SubRegIdxRanges`是每一个子寄存器的起止范围，被赋值为`X86SubRegIdxRanges`。
+
+   访问它们同样需要使用迭代器，这里用的是`MCSubRegIndexIterator`。典型用法如下：
+
+   ```cpp
+   for (MCSubRegIndexIterator SRII(RegNo, MCRI); SRII.isValid(); ++SRII) {
+       visit(SRII.getSubRegIndex, SRII.getSubReg...); // visit是你自己的函数
+   }
+   ```
+
+5. - [ ] 最后是和`Dwarf`等进行寄存器映射的结构，暂时不准备看它的实现。
+
+   ```cpp
+   unsigned L2DwarfRegsSize;
+   unsigned EHL2DwarfRegsSize;
+   unsigned Dwarf2LRegsSize;
+   unsigned EHDwarf2LRegsSize;
+   const DwarfLLVMRegPair *L2DwarfRegs;  // LLVM to Dwarf regs mapping
+   const DwarfLLVMRegPair *EHL2DwarfRegs;// LLVM to Dwarf regs mapping EH
+   const DwarfLLVMRegPair *Dwarf2LRegs;  // Dwarf to LLVM regs mapping
+   const DwarfLLVMRegPair *EHDwarf2LRegs;// Dwarf to LLVM regs mapping EH
+   DenseMap<MCRegister, int> L2SEHRegs;  // LLVM to SEH regs mapping
+   DenseMap<MCRegister, int> L2CVRegs;   // LLVM to CV regs mapping
+   ```
 
 ## TargetRegisterInfo
 
