@@ -463,8 +463,30 @@ struct MCRegisterDesc {
   
   于是可以得到如下映射：
   
+  | RegUnit | LaneBitmask |
+  | :-----: | :---------: |
+  |   AH    |     0x2     |
+  |   AL    |     0x1     |
+  |   HAX   |     0x8     |
   
+  这几个`LaneBitmask`可以在`SubRegIndexLaneMaskTable`中找到对应的定义：
+  ```cpp
+  static const LaneBitmask SubRegIndexLaneMaskTable[] = {
+    LaneBitmask::getAll(),
+    LaneBitmask(0x0000000000000001), // sub_8bit
+    LaneBitmask(0x0000000000000002), // sub_8bit_hi
+    LaneBitmask(0x0000000000000004), // sub_8bit_hi_phony
+    LaneBitmask(0x0000000000000007), // sub_16bit
+    LaneBitmask(0x0000000000000008), // sub_16bit_hi
+    LaneBitmask(0x000000000000000F), // sub_32bit
+    LaneBitmask(0x0000000000000010), // sub_mask_0
+    LaneBitmask(0x0000000000000020), // sub_mask_1
+    LaneBitmask(0x0000000000000040), // sub_xmm
+    LaneBitmask(0x0000000000000040), // sub_ymm
+   };
+  ```
   
+  我们可以验证这个`LaneMaskTable`是否符合之前的定义，比如sub_16bit是7，它和sub_8bit(1)、sub_8bit_hi(2)都有重叠，而7与1和2相与都不为0，符合条件！
 
 ## MCRegisterInfo
 
