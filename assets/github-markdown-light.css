@@ -99,10 +99,13 @@
 }
 
 .markdown-body img {
-  border-style: none;
-  max-width: 100%;
-  box-sizing: content-box;
-  background-color: #ffffff;
+  /* border-style: none; */
+  /* max-width: 100%; */
+  /* box-sizing: content-box; */
+  /* background-color: #ffffff; */
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .markdown-body code,
