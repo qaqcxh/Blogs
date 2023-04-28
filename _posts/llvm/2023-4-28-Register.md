@@ -4,7 +4,8 @@ categories: LLVM
 typora-root-url: ../../..
 ---
 
-[toc]
+* toc
+{:toc}
 
 # LLVM 寄存器信息描述
 
@@ -301,7 +302,7 @@ struct MCRegisterDesc {
   
   输出的结果如下：
   
-  ![](/Img/TestMCSubRegIndexIterator.png)
+  ![]({{ site.baseurl }}/Img/TestMCSubRegIndexIterator.png)
   
   现在我们知道了每个子寄存器对应的`Index`，那么这个`Index`有什么含义呢？首先最容易想到的是作为子寄存器的标识，不同子寄存器的`Index`肯定不一样，其次通过查找`SubRegIndex`的使用情况，发现两个与`Index`相关的函数：
   
@@ -425,7 +426,7 @@ struct MCRegisterDesc {
     
     输出如下：
     
-    ![](/Img/TestMCRegUnit.png)
+    ![]({{ site.baseurl }}/Img/TestMCRegUnit.png)
     
     符合预期！所以`MCRegisterDesc::RegUnit`保存的是一个组合值，译码后用于索引`DiffLists`得到`RegUnit`，而`RegUnit`需要继续索引`RegUnitRoots`才能得到最后的`root reg unit`。这些所谓的`root reg unit`可以认为是**最小的子寄存器**，它们是组成其他寄存器的最小单元。
 
@@ -728,7 +729,7 @@ extern const TargetRegisterClass GR8RegClass = {
   
   然后编译运行得到如下输出：
   
-  ![](/Img/TestTargetSubClassMask.png)
+  ![]({{ site.baseurl }}/Img/TestTargetSubClassMask.png)
 
   四个`SubRegClass`所包含的寄存器确实是`GR8RegClass`的子集，与掩码中第一个0x1d对应。
 
