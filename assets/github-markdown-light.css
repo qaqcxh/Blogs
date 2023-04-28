@@ -200,6 +200,8 @@
   width: max-content;
   max-width: 100%;
   overflow: auto;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .markdown-body td,
