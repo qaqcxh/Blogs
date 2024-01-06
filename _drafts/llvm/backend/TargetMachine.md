@@ -18,7 +18,7 @@ typora-root-url: ../../..
 
 ## 如何实现一个新的TargetMachine
 
-1. 创建一个空的`TargetMachine`并将其到`Target`中。
+1. 创建一个空的`TargetMachine`并将其注册到`Target`中。
 
 2. 实现`TargetMachine`。
 
@@ -57,19 +57,37 @@ typora-root-url: ../../..
    会显示：
 
    ```bash
-   Running pass 'Expand large div/rem' on function '@main' 出错
+   Running pass 'LoongArchMini DAG->DAG Pattern Instruction Selection' on function '@main' 出错
    ```
 
    原因在于`TargetMachine->getSubTargetImpl`没有实现，返回一个`nullptr`。所以你需要：
 
    * 实现`<YourTarget>SubTarget`类。
-     * 实现`<Target>ABI`
-     * 实现`<Target>FrameLowering`
-     * 实现`<Target>InstrInfo`
-     * 实现`<Target>RegisterInfo`
-     * 实现`<Target>TargetLowering`
-     * 实现`SelectionDAGTargetInfo`
+     - [ ] 实现`<Target>ABI` 
+     
+     - [ ] 实现`<Target>FrameLowering`
+       - [x] 继承`TargetFrameLowering`基类，实现`<YourTarget>FrameLowering`。暂时只实现其中的纯虚函数使编译通过。
+     
+       - [ ] 
+     
+     - [ ] 实现`<Target>InstrInfo`
+     - [ ] 实现`<Target>RegisterInfo`
+     - [ ] 实现`<Target>TargetLowering`
+       - [ ] 实现`bool CanLowerReturn`接口
+     - [ ] 实现`SelectionDAGTargetInfo`
    * 实现`getSubTargetImpl`
+   
+     - [x] 1. 继承LLVMTargetMachine实现`<YourTarget>TargetMachine`
+     - [x] 2. 在`<YourTarget>TargetMachine`中重载`getSubTargetImpl`函数
+
+
+
+## 如何添加一条指令
+
+1. 在td中加入指令描述。
+2. 实现LoongArchMiniMCDisassembler类：
+3. 注册MCInstPrinter:
+   1. 在MCTargetDesc/LoongArchMiniMCTargetDesc.cpp中加入LoongArchMiniInstPrinter的create函数，并将其注册到TargetMachin。
 
 ## 疑问记录
 - [x] 要在llvm支持一个后端架构，首先需要实现`Target`接口并注册，之后需要实现`TargetMachine`接口并将其注册到`Target`中，那么注册是如何进行的？
@@ -89,6 +107,11 @@ typora-root-url: ../../..
 - [ ] 只定义一个`SelectionDAGISel`pass后为什么`llc`实际显示还添加了大量pass？这些pass是何时添加的，作用是什么？
 
 - [ ] `Immutable Pass`一般不运行pass，而是提供一些数据信息供其他pass使用，那么其他pass如何使用`Immutable Pass`的信息呢？
+
+- [ ] `TargetLowering`中的`LowerReturn`的实现：
+
+  - [ ] 根据调用约定，在处理return时应该将返回值放入合适的位置
+
 
 ## 注解
 
