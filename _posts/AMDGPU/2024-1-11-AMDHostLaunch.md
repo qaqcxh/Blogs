@@ -8,6 +8,8 @@ typora-root-url: ../../../
 * toc
 {:toc}
 
+# AMDGPU Host启动分析
+
 ## 1. 引言
 
 HIP程序在编译完后会得到一个host ELF文件。而device代码在编译完后会被bundle，作`.hip_fatbin section`嵌入在该ELF中。那么在运行host ELF之后，HIP是如何将host ELF携带的device代码传递给runtime的呢？它又是如何进行kernel launch的呢？本文将进行解答。
